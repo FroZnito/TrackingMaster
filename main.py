@@ -1,5 +1,5 @@
 """
-TrackingMaster v0.2 - Hand Detection
+TrackingMaster v0.3.1 - Finger Tracking
 Main entry point of the application.
 
 Controls:
@@ -7,394 +7,361 @@ Controls:
     SPACE    : Pause / Resume
     S        : Screenshot
     I        : Toggle info overlay
+    ? / /    : Toggle help window
     H        : Toggle hand tracking
+    F        : Toggle finger tracking display
+    N        : Toggle number detection
+    G        : Toggle gesture detection
+    D        : Toggle debug mode
+    R        : Toggle recording (exports JSON/CSV on stop)
     [ / ]    : Adjust detection threshold (-/+)
     ; / '    : Adjust tracking threshold (-/+)
+    1-6      : Debug threshold adjustments
 """
 
 import cv2
 import sys
 import time
 from collections import deque
+from typing import Dict, List, Optional
+
+from config import config
 from src.camera import Camera, list_available_cameras
 from src.hand_tracker import HandTracker
+from src.finger_tracker import FingerTracker, TrackingDataRecorder
+from src.overlay_renderer import OverlayRenderer
+from src.logger import setup_logging
 
+# Initialize logging
+logger = setup_logging()
 
-# Configuration
-WINDOW_NAME = "TrackingMaster v0.2"
-DEFAULT_CAMERA = 0
-FPS_SMOOTHING_WINDOW = 30  # Nombre de frames pour la moyenne glissante
+WINDOW_NAME = config.ui.window_name
+FPS_SMOOTHING_WINDOW = config.ui.fps_smoothing_window
 
 
 class FPSCounter:
-    """Compteur de FPS avec moyenne glissante."""
+    """Smoothed FPS counter using rolling average."""
 
     def __init__(self, window_size: int = 30):
-        self.window_size = window_size
-        self.times = deque(maxlen=window_size)
-        self.last_time = time.time()
+        self.times: deque = deque(maxlen=window_size)
+        self.last_time: float = time.perf_counter()
 
     def update(self) -> float:
-        """Met à jour et retourne le FPS lissé."""
-        current_time = time.time()
+        current_time = time.perf_counter()
         delta = current_time - self.last_time
         self.last_time = current_time
-
         if delta > 0:
             self.times.append(delta)
-
         if len(self.times) > 0:
             avg_delta = sum(self.times) / len(self.times)
             return 1.0 / avg_delta if avg_delta > 0 else 0.0
         return 0.0
 
 
-def draw_info_overlay(
-    frame,
-    fps: float,
-    is_paused: bool,
-    show_info: bool,
-    hand_tracking_enabled: bool = True,
-    hands_info: list = None,
-    detection_conf: float = 0.7,
-    tracking_conf: float = 0.5
-):
-    """Draw information overlay on the frame."""
-    if not show_info:
-        return frame
-
-    height, width = frame.shape[:2]
-
-    # Information lines
-    info_lines = [
-        f"FPS: {fps:.1f}",
-        f"Resolution: {width}x{height}",
-        f"Status: {'PAUSED' if is_paused else 'RUNNING'}",
-        f"Hand Tracking: {'ON' if hand_tracking_enabled else 'OFF'}"
-    ]
-
-    # Add confidence thresholds
-    if hand_tracking_enabled:
-        info_lines.append(f"Detection: {detection_conf:.0%} [/]")
-        info_lines.append(f"Tracking: {tracking_conf:.0%} [;']")
-
-    # Add detected hands info
-    if hand_tracking_enabled and hands_info:
-        info_lines.append(f"Hands detected: {len(hands_info)}")
-        for hand in hands_info:
-            info_lines.append(f"  {hand['type']} ({hand['confidence']*100:.0f}%)")
-    elif hand_tracking_enabled:
-        info_lines.append("Hands detected: 0")
-
-    # Controls
-    info_lines.append("")
-    info_lines.append("[H] Hands  [I] Info  [S] Shot")
-
-    # Calculate background size
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.55
-    thickness = 1
-    padding = 15
-    line_height = 22
-
-    # Find max text width
-    max_width = 0
-    for line in info_lines:
-        (text_width, _), _ = cv2.getTextSize(line, font, font_scale, thickness)
-        max_width = max(max_width, text_width)
-
-    # Rectangle dimensions
-    rect_width = max_width + padding * 2
-    rect_height = len(info_lines) * line_height + padding * 2 - 5
-
-    # Semi-transparent background
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (10, 10), (10 + rect_width, 10 + rect_height), (0, 0, 0), -1)
-    frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
-
-    # Draw text
-    y_offset = 10 + padding + 12
-    for line in info_lines:
-        if "PAUSED" in line:
-            color = (0, 255, 255)  # Yellow
-        elif "RUNNING" in line:
-            color = (0, 255, 0)  # Green
-        elif "ON" in line and "Hand" in line:
-            color = (0, 255, 0)  # Green
-        elif "OFF" in line and "Hand" in line:
-            color = (0, 0, 255)  # Red
-        elif "Right" in line:
-            color = (0, 255, 0)  # Green
-        elif "Left" in line:
-            color = (255, 0, 0)  # Blue
-        elif "Detection:" in line or "Tracking:" in line:
-            color = (200, 200, 200)  # Light gray
-        else:
-            color = (255, 255, 255)  # White
-
-        cv2.putText(
-            frame, line,
-            (10 + padding, y_offset),
-            font, font_scale, color, thickness, cv2.LINE_AA
-        )
-        y_offset += line_height
-
-    return frame
-
-
-def draw_no_hands_indicator(frame):
-    """Display visual indicator when no hands are detected."""
-    height, width = frame.shape[:2]
-
-    # Text at bottom center
-    text = "No hands detected"
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.7
-    thickness = 2
-
-    (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
-
-    # Centered position at bottom
-    x = (width - text_width) // 2
-    y = height - 30
-
-    # Semi-transparent background
-    padding = 10
-    overlay = frame.copy()
-    cv2.rectangle(
-        overlay,
-        (x - padding, y - text_height - padding),
-        (x + text_width + padding, y + padding),
-        (0, 0, 100), -1
-    )
-    frame = cv2.addWeighted(overlay, 0.7, frame, 0.3, 0)
-
-    # Text
-    cv2.putText(
-        frame, text,
-        (x, y),
-        font, font_scale, (100, 100, 255), thickness, cv2.LINE_AA
-    )
-
-    return frame
-
-
-def draw_pause_indicator(frame):
-    """Display pause indicator at center."""
-    height, width = frame.shape[:2]
-    center_x, center_y = width // 2, height // 2
-
-    # Icône pause (deux barres)
-    bar_width = 20
-    bar_height = 60
-    gap = 20
-
-    cv2.rectangle(
-        frame,
-        (center_x - gap - bar_width, center_y - bar_height // 2),
-        (center_x - gap, center_y + bar_height // 2),
-        (255, 255, 255), -1
-    )
-    cv2.rectangle(
-        frame,
-        (center_x + gap, center_y - bar_height // 2),
-        (center_x + gap + bar_width, center_y + bar_height // 2),
-        (255, 255, 255), -1
-    )
-
-    return frame
-
-
-def select_camera(cameras: list) -> int:
-    """
-    Allow user to select a camera.
-
-    Args:
-        cameras: List of available cameras
-
-    Returns:
-        Selected camera ID, or -1 if cancelled
-    """
+def select_camera(cameras: List[Dict]) -> int:
+    """Prompt user to select a camera."""
     valid_ids = [cam["id"] for cam in cameras]
-
     while True:
         try:
             if len(cameras) == 1:
-                cam = cameras[0]
-                choice = input(f"\nInitialize camera {cam['id']}? (Y/n): ").strip().lower()
+                choice = input(f"\nInitialize camera {cameras[0]['id']}? (Y/n): ").strip().lower()
                 if choice in ("", "y", "yes", "o", "oui"):
-                    return cam["id"]
+                    return cameras[0]["id"]
                 elif choice in ("n", "no", "non"):
-                    print("Cancelled.")
+                    logger.info("Cancelled.")
                     sys.exit(0)
-                else:
-                    print("Answer Y (yes) or N (no)")
             else:
-                choice = input(f"\nWhich camera to initialize? {valid_ids}: ").strip()
-                selected_id = int(choice)
-
+                selected_id = int(input(f"\nWhich camera? {valid_ids}: ").strip())
                 if selected_id in valid_ids:
                     return selected_id
-                else:
-                    print(f"Invalid choice. Options: {valid_ids}")
+                logger.warning(f"Invalid. Options: {valid_ids}")
         except ValueError:
-            print(f"Enter a number from {valid_ids}")
+            logger.warning(f"Enter a number from {valid_ids}")
         except KeyboardInterrupt:
-            print("\nCancelled.")
+            logger.info("Cancelled.")
             sys.exit(0)
 
 
-def main():
-    """Main function."""
-    print("=" * 50)
-    print("  TrackingMaster v0.2 - Hand Detection")
-    print("=" * 50)
+def create_toast(message: str) -> Dict:
+    """Create a toast notification."""
+    return {"message": message, "timestamp": time.time()}
 
-    # Scan available cameras
-    print("\n[1/4] Scanning cameras...")
+
+def main():
+    logger.info("=" * 50)
+    logger.info("  TrackingMaster v0.3.1 - Finger Tracking")
+    logger.info("=" * 50)
+
+    # Camera setup
+    logger.info("[1/4] Scanning cameras...")
     cameras = list_available_cameras()
 
     if not cameras:
-        print("  ERROR: No camera detected!")
-        print("  Make sure your webcam is connected and not used by another application.")
+        logger.error("No camera detected!")
         sys.exit(1)
 
-    print(f"\n  {len(cameras)} camera(s) available:")
+    logger.info(f"{len(cameras)} camera(s) available:")
     for cam in cameras:
-        print(f"    [{cam['id']}] {cam['name']}")
-        print(f"        Resolution: {cam['resolution']} | FPS: {cam['fps']:.0f} | Backend: {cam['backend']}")
+        logger.info(f"  [{cam['id']}] {cam['name']} - {cam['resolution']}")
 
-    # Camera selection
     selected_id = select_camera(cameras)
 
-    # Initialize selected camera
-    print(f"\n[2/4] Initializing camera {selected_id}...")
+    logger.info(f"[2/4] Initializing camera {selected_id}...")
     camera = Camera(camera_id=selected_id)
-
     if not camera.start():
-        print(f"  ERROR: Cannot open camera {selected_id}!")
+        logger.error("Cannot open camera!")
         sys.exit(1)
 
-    resolution = camera.get_resolution()
+    # Trackers setup
+    logger.info("[3/4] Initializing trackers...")
+    hand_tracker = HandTracker(max_hands=config.hand_tracking.max_hands)
+    finger_tracker = FingerTracker(smoothing_frames=config.finger_tracking.smoothing_frames)
+    data_recorder = TrackingDataRecorder()
 
-    # Initialize hand tracker
-    print(f"\n[3/4] Initializing Hand Tracker...")
-    hand_tracker = HandTracker(max_hands=2)
-    print(f"  > MediaPipe Hands loaded... OK")
-    print(f"  > Detecting up to 2 hands")
+    logger.info("  > Hand Tracker... OK")
+    logger.info("  > Finger Tracker... OK")
+    logger.info("  > Data Recorder... OK")
 
-    print(f"\n[4/4] Starting...")
-    print(f"  Camera ready: {resolution[0]}x{resolution[1]}")
-    print("\nControls:")
-    print("  Q / ESC  : Quit")
-    print("  SPACE    : Pause / Resume")
-    print("  S        : Screenshot")
-    print("  I        : Toggle info overlay")
-    print("  H        : Toggle hand tracking")
-    print("  [ / ]    : Detection threshold (-/+ 5%)")
-    print("  ; / '    : Tracking threshold (-/+ 5%)")
-    print("-" * 50)
+    # Overlay renderer
+    logger.info("[4/4] Initializing renderer...")
+    renderer = OverlayRenderer()
+    logger.info("  > Overlay Renderer... OK")
 
-    # Variables
+    logger.info("Starting...")
+    logger.info("Controls:")
+    logger.info("  [Q/ESC] Quit  [SPACE] Pause  [S] Screenshot")
+    logger.info("  [H] Hands  [F] Fingers  [N] Numbers  [G] Gestures")
+    logger.info("  [D] Debug  [R] Record  [?] Help")
+    logger.info("-" * 50)
+
+    # State variables
     fps_counter = FPSCounter(FPS_SMOOTHING_WINDOW)
-    show_info = True
-    hand_tracking_enabled = True
+    show_info: bool = True
+    show_help: bool = False
+    hand_tracking_enabled: bool = True
+    finger_display_enabled: bool = True
+    number_detection_enabled: bool = True
+    gesture_detection_enabled: bool = True
+    current_toast: Optional[Dict] = None
 
     try:
         while True:
-            # Lire une frame
             success, frame = camera.read_frame()
-
             if not success:
-                print("ERROR: Cannot read frame")
+                logger.error("Cannot read frame - camera may be disconnected")
                 break
 
-            # Calculer le FPS (lissé)
             fps = fps_counter.update()
 
-            # Tracking des mains
-            hands_info = []
+            # Clear expired toast
+            if current_toast and time.time() - current_toast["timestamp"] > 2.0:
+                current_toast = None
+
+            # Prepare render state
+            render_state = {
+                "fps": fps,
+                "is_paused": camera.is_paused,
+                "show_info": show_info,
+                "show_help": show_help,
+                "hand_tracking_enabled": hand_tracking_enabled,
+                "finger_display_enabled": finger_display_enabled,
+                "number_detection_enabled": number_detection_enabled,
+                "gesture_detection_enabled": gesture_detection_enabled,
+                "debug_mode": finger_tracker.debug_mode,
+                "is_recording": data_recorder.is_recording,
+                "record_frames": data_recorder.get_frame_count(),
+                "thresholds": finger_tracker.get_thresholds(),
+                "hands_info": [],
+                "finger_data": [],
+                "no_hands": False,
+                "toast": current_toast,
+            }
+
+            # Process tracking (synchronous - no threading)
             if hand_tracking_enabled and not camera.is_paused:
-                hand_tracker.process(frame)
+                hands = hand_tracker.process(frame)
                 hand_tracker.draw(frame)
-                hands_info = hand_tracker.get_hands_info()
+                render_state["hands_info"] = hand_tracker.get_hands_info()
 
-            # Récupérer les seuils actuels
-            detection_conf, tracking_conf = hand_tracker.get_confidence()
+                if hands:
+                    for hand in hands:
+                        analysis = finger_tracker.analyze_hand(
+                            hand.landmarks, hand.handedness, hand_id=hand.hand_id
+                        )
+                        curl_angles = finger_tracker.get_curl_angles(hand.landmarks)
+                        spread_angles = finger_tracker.get_spread_angles(hand.landmarks)
 
-            # Dessiner les overlays
-            frame = draw_info_overlay(
-                frame, fps, camera.is_paused, show_info,
-                hand_tracking_enabled, hands_info,
-                detection_conf, tracking_conf
-            )
+                        gesture_to_show = analysis.gesture_name if gesture_detection_enabled else ""
 
-            # Indicateur aucune main détectée
-            if hand_tracking_enabled and not hands_info and not camera.is_paused:
-                frame = draw_no_hands_indicator(frame)
+                        finger_data = {
+                            "hand_type": hand.handedness,
+                            "landmarks": hand.landmarks,
+                            "gesture": gesture_to_show,
+                            "finger_count": analysis.finger_count,
+                            "finger_states": analysis.finger_states.as_list(),
+                            "confidence": analysis.confidence.as_dict(),
+                            "curl_angles": curl_angles,
+                            "spread_angles": spread_angles,
+                            "analysis": analysis
+                        }
+                        render_state["finger_data"].append(finger_data)
 
-            if camera.is_paused:
-                frame = draw_pause_indicator(frame)
+                        if data_recorder.is_recording:
+                            data_recorder.add_frame(hand.handedness, analysis, curl_angles)
+                else:
+                    render_state["no_hands"] = True
 
-            # Afficher la frame
+            elif hand_tracking_enabled:
+                render_state["no_hands"] = True
+
+            # Render overlays
+            frame = renderer.render(frame, render_state)
+
+            # Display
             cv2.imshow(WINDOW_NAME, frame)
 
-            # Gérer les entrées clavier
+            # Handle keyboard input
             key = cv2.waitKey(1) & 0xFF
 
-            if key == ord('q') or key == 27:  # Q or ESC
-                print("\nClosing...")
+            if key == ord('q') or key == 27:
+                logger.info("Closing...")
                 break
 
-            elif key == ord(' '):  # SPACE
+            elif key == ord(' '):
                 paused = camera.toggle_pause()
-                print(f"{'Paused' if paused else 'Resumed'}")
+                status = 'Paused' if paused else 'Resumed'
+                logger.info(status)
+                current_toast = create_toast(status)
 
-            elif key == ord('s'):  # S
+            elif key == ord('s'):
                 filepath = camera.take_screenshot(camera.last_frame)
                 if filepath:
-                    print(f"Screenshot saved: {filepath}")
+                    logger.info(f"Screenshot: {filepath}")
+                    current_toast = create_toast("Screenshot saved")
 
-            elif key == ord('i'):  # I
+            elif key == ord('i'):
                 show_info = not show_info
 
-            elif key == ord('h'):  # H
+            elif key == ord('?') or key == ord('/'):
+                show_help = not show_help
+
+            elif key == ord('h'):
                 hand_tracking_enabled = not hand_tracking_enabled
-                print(f"Hand tracking: {'enabled' if hand_tracking_enabled else 'disabled'}")
+                status = f"Hand tracking: {'ON' if hand_tracking_enabled else 'OFF'}"
+                logger.info(status)
+                current_toast = create_toast(status)
 
-            elif key == ord(']'):  # ] (increase detection)
-                new_val = detection_conf + 0.05
-                hand_tracker.set_confidence(detection=new_val)
+            elif key == ord('f'):
+                finger_display_enabled = not finger_display_enabled
+                logger.info(f"Finger display: {'ON' if finger_display_enabled else 'OFF'}")
+
+            elif key == ord('n'):
+                number_detection_enabled = not number_detection_enabled
+                status = f"Numbers: {'ON' if number_detection_enabled else 'OFF'}"
+                logger.info(status)
+                current_toast = create_toast(status)
+
+            elif key == ord('g'):
+                gesture_detection_enabled = not gesture_detection_enabled
+                status = f"Gestures: {'ON' if gesture_detection_enabled else 'OFF'}"
+                logger.info(status)
+                current_toast = create_toast(status)
+
+            elif key == ord('d'):
+                debug = finger_tracker.toggle_debug_mode()
+                status = f"Debug: {'ON' if debug else 'OFF'}"
+                logger.info(status)
+                current_toast = create_toast(status)
+
+            elif key == ord('r'):
+                is_now_recording = data_recorder.toggle_recording()
+                if is_now_recording:
+                    logger.info("Recording started...")
+                    current_toast = create_toast("Recording started")
+                else:
+                    if data_recorder.get_frame_count() > 0:
+                        json_path, csv_path = data_recorder.export_all()
+                        logger.info(f"Recording stopped. Exported:")
+                        logger.info(f"  JSON: {json_path}")
+                        logger.info(f"  CSV: {csv_path}")
+                        current_toast = create_toast("Recording saved")
+                    else:
+                        logger.info("Recording stopped (no data)")
+                        current_toast = create_toast("Recording stopped")
+
+            # Threshold adjustments
+            elif key == ord('1'):
+                new_val = finger_tracker.adjust_curl_threshold(-5)
+                logger.info(f"Finger curl threshold: {new_val:.0f}")
+                current_toast = create_toast(f"Finger curl: {new_val:.0f}")
+
+            elif key == ord('2'):
+                new_val = finger_tracker.adjust_curl_threshold(5)
+                logger.info(f"Finger curl threshold: {new_val:.0f}")
+                current_toast = create_toast(f"Finger curl: {new_val:.0f}")
+
+            elif key == ord('3'):
+                new_val = finger_tracker.adjust_thumb_curl_threshold(-5)
+                logger.info(f"Thumb curl threshold: {new_val:.0f}")
+                current_toast = create_toast(f"Thumb curl: {new_val:.0f}")
+
+            elif key == ord('4'):
+                new_val = finger_tracker.adjust_thumb_curl_threshold(5)
+                logger.info(f"Thumb curl threshold: {new_val:.0f}")
+                current_toast = create_toast(f"Thumb curl: {new_val:.0f}")
+
+            elif key == ord('5'):
+                new_val = finger_tracker.adjust_spread_threshold(-5)
+                logger.info(f"Spread threshold: {new_val:.0f}")
+                current_toast = create_toast(f"Spread: {new_val:.0f}")
+
+            elif key == ord('6'):
+                new_val = finger_tracker.adjust_spread_threshold(5)
+                logger.info(f"Spread threshold: {new_val:.0f}")
+                current_toast = create_toast(f"Spread: {new_val:.0f}")
+
+            elif key == ord(']'):
+                detection_conf, _ = hand_tracker.get_confidence()
+                hand_tracker.set_confidence(detection=detection_conf + 0.05)
                 d, _ = hand_tracker.get_confidence()
-                print(f"Detection threshold: {d:.0%}")
+                logger.info(f"Detection: {d:.0%}")
+                current_toast = create_toast(f"Detection: {d:.0%}")
 
-            elif key == ord('['):  # [ (decrease detection)
-                new_val = detection_conf - 0.05
-                hand_tracker.set_confidence(detection=new_val)
+            elif key == ord('['):
+                detection_conf, _ = hand_tracker.get_confidence()
+                hand_tracker.set_confidence(detection=detection_conf - 0.05)
                 d, _ = hand_tracker.get_confidence()
-                print(f"Detection threshold: {d:.0%}")
+                logger.info(f"Detection: {d:.0%}")
+                current_toast = create_toast(f"Detection: {d:.0%}")
 
-            elif key == ord("'"):  # ' (increase tracking)
-                new_val = tracking_conf + 0.05
-                hand_tracker.set_confidence(tracking=new_val)
+            elif key == ord("'"):
+                _, tracking_conf = hand_tracker.get_confidence()
+                hand_tracker.set_confidence(tracking=tracking_conf + 0.05)
                 _, t = hand_tracker.get_confidence()
-                print(f"Tracking threshold: {t:.0%}")
+                logger.info(f"Tracking: {t:.0%}")
+                current_toast = create_toast(f"Tracking: {t:.0%}")
 
-            elif key == ord(';'):  # ; (decrease tracking)
-                new_val = tracking_conf - 0.05
-                hand_tracker.set_confidence(tracking=new_val)
+            elif key == ord(';'):
+                _, tracking_conf = hand_tracker.get_confidence()
+                hand_tracker.set_confidence(tracking=tracking_conf - 0.05)
                 _, t = hand_tracker.get_confidence()
-                print(f"Tracking threshold: {t:.0%}")
+                logger.info(f"Tracking: {t:.0%}")
+                current_toast = create_toast(f"Tracking: {t:.0%}")
 
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        logger.info("Interrupted")
 
     finally:
-        # Cleanup
+        logger.info("Shutting down...")
+
+        if data_recorder.is_recording and data_recorder.get_frame_count() > 0:
+            json_path, csv_path = data_recorder.export_all()
+            logger.info(f"Auto-exported recording: {json_path}, {csv_path}")
+
         hand_tracker.release()
         camera.release()
         cv2.destroyAllWindows()
-        print("TrackingMaster closed.")
+        logger.info("TrackingMaster closed.")
 
 
 if __name__ == "__main__":

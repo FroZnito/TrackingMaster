@@ -369,6 +369,16 @@ class HandTracker:
 
         return self.hands_data
 
+    # Hand connections (same as MediaPipe)
+    HAND_CONNECTIONS = [
+        (0, 1), (1, 2), (2, 3), (3, 4),  # Thumb
+        (0, 5), (5, 6), (6, 7), (7, 8),  # Index
+        (0, 9), (9, 10), (10, 11), (11, 12),  # Middle
+        (0, 13), (13, 14), (14, 15), (15, 16),  # Ring
+        (0, 17), (17, 18), (18, 19), (19, 20),  # Pinky
+        (5, 9), (9, 13), (13, 17)  # Palm
+    ]
+
     def draw(self, frame, draw_landmarks: bool = True, draw_connections: bool = True) -> None:
         """
         Draw detected hands on frame using smoothed landmarks.
@@ -381,44 +391,52 @@ class HandTracker:
         if not self.hands_data:
             return
 
+        for hand_data in self.hands_data:
+            self.draw_landmarks(frame, hand_data.landmarks, hand_data.handedness,
+                               draw_landmarks, draw_connections)
+
+    def draw_landmarks(self, frame, landmarks: list, handedness: str = "Right",
+                       draw_points: bool = True, draw_connections: bool = True) -> None:
+        """
+        Draw landmarks from a provided list (for threaded mode).
+
+        Args:
+            frame: Image to draw on
+            landmarks: List of 21 (x, y, z) normalized landmarks
+            handedness: "Left" or "Right"
+            draw_points: Draw landmark points
+            draw_connections: Draw connections between landmarks
+        """
+        if not landmarks or len(landmarks) != 21:
+            return
+
         h, w = frame.shape[:2]
 
-        # Hand connections (same as MediaPipe)
-        HAND_CONNECTIONS = [
-            (0, 1), (1, 2), (2, 3), (3, 4),  # Thumb
-            (0, 5), (5, 6), (6, 7), (7, 8),  # Index
-            (0, 9), (9, 10), (10, 11), (11, 12),  # Middle
-            (0, 13), (13, 14), (14, 15), (15, 16),  # Ring
-            (0, 17), (17, 18), (18, 19), (19, 20),  # Pinky
-            (5, 9), (9, 13), (13, 17)  # Palm
-        ]
+        # Color based on hand (left = blue, right = green)
+        if handedness == "Right":
+            landmark_color = (0, 255, 0)  # Green for right hand
+            connection_color = (0, 200, 0)
+        else:
+            landmark_color = (255, 0, 0)  # Blue for left hand
+            connection_color = (200, 0, 0)
 
-        for hand_data in self.hands_data:
-            # Color based on hand (left = blue, right = green)
-            if hand_data.handedness == "Right":
-                landmark_color = (0, 255, 0)  # Green for right hand
-                connection_color = (0, 200, 0)
-            else:
-                landmark_color = (255, 0, 0)  # Blue for left hand
-                connection_color = (200, 0, 0)
+        # Convert normalized landmarks to pixel coordinates
+        points = []
+        for lm in landmarks:
+            px = int(lm[0] * w)
+            py = int(lm[1] * h)
+            points.append((px, py))
 
-            # Convert normalized landmarks to pixel coordinates
-            points = []
-            for lm in hand_data.landmarks:
-                px = int(lm[0] * w)
-                py = int(lm[1] * h)
-                points.append((px, py))
+        # Draw connections
+        if draw_connections:
+            for start_idx, end_idx in self.HAND_CONNECTIONS:
+                cv2.line(frame, points[start_idx], points[end_idx], connection_color, 2)
 
-            # Draw connections
-            if draw_connections:
-                for start_idx, end_idx in HAND_CONNECTIONS:
-                    cv2.line(frame, points[start_idx], points[end_idx], connection_color, 2)
-
-            # Draw landmarks
-            if draw_landmarks:
-                for px, py in points:
-                    cv2.circle(frame, (px, py), 4, landmark_color, -1)
-                    cv2.circle(frame, (px, py), 5, connection_color, 1)
+        # Draw landmarks
+        if draw_points:
+            for px, py in points:
+                cv2.circle(frame, (px, py), 4, landmark_color, -1)
+                cv2.circle(frame, (px, py), 5, connection_color, 1)
 
     def get_hand_count(self) -> int:
         """Return number of detected hands."""

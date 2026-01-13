@@ -35,15 +35,31 @@ Un projet de tracking complet utilisant la vision par ordinateur et l'intelligen
 
 ---
 
-## Version 0.3 - Finger Tracking
+## Version 0.3 - Finger Tracking ✅
 **Objectif** : Tracking précis des doigts et reconnaissance de gestes basiques
 
 ### Features
-- [ ] Identification de chaque doigt (pouce, index, majeur, annulaire, auriculaire)
-- [ ] Détection doigt levé / baissé
-- [ ] Comptage des doigts levés
-- [ ] Gestes basiques : pouce levé, poing fermé, main ouverte, peace sign
-- [ ] Affichage visuel de l'état de chaque doigt
+- [x] Identification de chaque doigt (pouce, index, majeur, annulaire, auriculaire)
+- [x] Détection doigt levé / baissé avec multi-critères (5 critères, 3+ requis)
+- [x] Comptage universel des doigts (n'importe quels doigts = compte)
+- [x] Reconnaissance de 17 gestes (fist, open_hand, thumbs_up, thumbs_down, peace, two, pointing, ok, rock, three, four, gun, call_me, loser, pinky_up, thumb_index_pinky)
+- [x] Différenciation Peace (V écarté) vs Two (doigts serrés) via angle de spread
+- [x] Affichage visuel de l'état de chaque doigt avec indicateurs de confiance
+- [x] Mode debug avec seuils ajustables en temps réel (curl, thumb_curl, spread)
+- [x] Score de confiance par doigt (0-5 critères validés)
+- [x] Export des données en JSON et CSV (dossier `data/`)
+- [x] Fenêtre d'aide avec toutes les commandes [?]
+
+### Performance
+- [x] Threading : MediaPipe en arrière-plan (~30 FPS), rendu principal (~60 FPS)
+- [x] Single-pass overlay rendering (3-5x plus rapide)
+- [x] Toggle threading avec touche [T]
+
+### Technologies
+- Module FingerTracker avec analyse multi-critères des landmarks
+- Module ThreadedTracker pour traitement asynchrone
+- Module OverlayRenderer pour rendu optimisé
+- Système de thème UI moderne (classe Theme)
 
 ---
 
