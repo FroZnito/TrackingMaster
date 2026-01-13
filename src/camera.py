@@ -1,6 +1,6 @@
 """
-TrackingMaster v0.1 - Camera Module
-Gestion de l'accès à la webcam et des contrôles de base.
+TrackingMaster v0.2 - Camera Module
+Webcam access and basic controls management.
 """
 
 import cv2
@@ -10,16 +10,16 @@ from pathlib import Path
 
 
 class Camera:
-    """Classe pour gérer l'accès à la webcam et les contrôles."""
+    """Class to manage webcam access and controls."""
 
     def __init__(self, camera_id: int = 0, width: int = 1280, height: int = 720):
         """
-        Initialise la caméra.
+        Initialize camera.
 
         Args:
-            camera_id: ID de la caméra (0 = caméra par défaut)
-            width: Largeur de la capture
-            height: Hauteur de la capture
+            camera_id: Camera ID (0 = default camera)
+            width: Capture width
+            height: Capture height
         """
         self.camera_id = camera_id
         self.width = width
@@ -31,15 +31,15 @@ class Camera:
 
     def start(self, verbose: bool = True) -> bool:
         """
-        Démarre la capture vidéo.
+        Start video capture.
 
         Args:
-            verbose: Afficher les messages de progression
+            verbose: Display progress messages
 
         Returns:
-            True si la caméra est ouverte avec succès, False sinon.
+            True if camera opened successfully, False otherwise.
         """
-        # Utiliser DirectShow sur Windows pour une initialisation plus rapide
+        # Use DirectShow on Windows for faster initialization
         if sys.platform == "win32":
             self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
         else:
@@ -49,38 +49,38 @@ class Camera:
             return False
 
         if verbose:
-            print(f"  > Connexion a la camera {self.camera_id}... OK")
+            print(f"  > Connecting to camera {self.camera_id}... OK")
 
-        # Réduire le buffer pour moins de latence
+        # Reduce buffer for less latency
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        # Configuration de la résolution
+        # Configure resolution
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
 
-        # Définir le FPS cible
+        # Set target FPS
         self.cap.set(cv2.CAP_PROP_FPS, 30)
 
         if verbose:
             actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            print(f"  > Configuration resolution {actual_w}x{actual_h}... OK")
+            print(f"  > Setting resolution {actual_w}x{actual_h}... OK")
 
-        # Vérifier et créer le dossier screenshots si nécessaire
+        # Check and create screenshots folder if needed
         if verbose:
-            print(f"  > Verification du dossier '{self.screenshot_dir}'...", end=" ")
+            print(f"  > Checking folder '{self.screenshot_dir}'...", end=" ")
 
         if self.screenshot_dir.exists():
             if verbose:
-                print("existe deja")
+                print("exists")
         else:
             self.screenshot_dir.mkdir(exist_ok=True)
             if verbose:
-                print("cree")
+                print("created")
 
-        # Lire une première frame pour "chauffer" la caméra
+        # Read first frame to warm up camera
         if verbose:
-            print(f"  > Warmup camera...", end=" ")
+            print(f"  > Warming up camera...", end=" ")
         self.cap.read()
         if verbose:
             print("OK")
@@ -89,10 +89,10 @@ class Camera:
 
     def read_frame(self):
         """
-        Lit une frame de la caméra.
+        Read a frame from the camera.
 
         Returns:
-            tuple: (success, frame) - success est un booléen, frame est l'image
+            tuple: (success, frame) - success is boolean, frame is the image
         """
         if self.cap is None:
             return False, None
@@ -103,26 +103,26 @@ class Camera:
         success, frame = self.cap.read()
 
         if success:
-            # Miroir horizontal pour un affichage naturel
+            # Horizontal mirror for natural display
             frame = cv2.flip(frame, 1)
             self.last_frame = frame
 
         return success, frame
 
     def toggle_pause(self):
-        """Bascule entre pause et lecture."""
+        """Toggle between pause and play."""
         self.is_paused = not self.is_paused
         return self.is_paused
 
     def take_screenshot(self, frame) -> str:
         """
-        Prend une capture d'écran.
+        Take a screenshot.
 
         Args:
-            frame: L'image à sauvegarder
+            frame: The image to save
 
         Returns:
-            Le chemin du fichier sauvegardé
+            The path of the saved file
         """
         if frame is None:
             return None
@@ -133,13 +133,13 @@ class Camera:
         return str(filename)
 
     def get_fps(self) -> float:
-        """Retourne le FPS de la caméra."""
+        """Return the camera FPS."""
         if self.cap is None:
             return 0.0
         return self.cap.get(cv2.CAP_PROP_FPS)
 
     def get_resolution(self) -> tuple:
-        """Retourne la résolution actuelle (width, height)."""
+        """Return current resolution (width, height)."""
         if self.cap is None:
             return (0, 0)
         return (
@@ -148,27 +148,27 @@ class Camera:
         )
 
     def release(self):
-        """Libère les ressources de la caméra."""
+        """Release camera resources."""
         if self.cap is not None:
             self.cap.release()
             self.cap = None
 
 
 class CameraError(Exception):
-    """Exception personnalisée pour les erreurs de caméra."""
+    """Custom exception for camera errors."""
     pass
 
 
 def get_camera_names_windows() -> list:
     """
-    Récupère les noms des caméras sur Windows via pygrabber (DirectShow).
+    Get camera names on Windows via pygrabber (DirectShow).
 
     Returns:
-        Liste des noms de caméras dans l'ordre
+        List of camera names in order
     """
     names = []
 
-    # Utiliser pygrabber pour récupérer les noms DirectShow
+    # Use pygrabber to get DirectShow names
     try:
         from pygrabber.dshow_graph import FilterGraph
 
@@ -179,36 +179,36 @@ def get_camera_names_windows() -> list:
         if names:
             return names
     except ImportError:
-        pass  # pygrabber non installé
+        pass  # pygrabber not installed
     except Exception:
         pass
 
-    # Fallback: noms génériques
+    # Fallback: generic names
     return names
 
 
 def list_available_cameras(max_cameras: int = 3, target_width: int = 1280, target_height: int = 720) -> list:
     """
-    Liste les caméras disponibles sur le système.
+    List available cameras on the system.
 
     Args:
-        max_cameras: Nombre maximum de caméras à tester
-        target_width: Largeur cible pour tester les capacités
-        target_height: Hauteur cible pour tester les capacités
+        max_cameras: Maximum number of cameras to test
+        target_width: Target width to test capabilities
+        target_height: Target height to test capabilities
 
     Returns:
-        Liste de dictionnaires avec les infos de chaque caméra disponible
+        List of dictionaries with info for each available camera
     """
     import os
 
     available = []
 
-    # Récupérer les noms des caméras sur Windows
+    # Get camera names on Windows
     camera_names_list = []
     if sys.platform == "win32":
         camera_names_list = get_camera_names_windows()
 
-    # Sauvegarder et rediriger stderr au niveau OS
+    # Save and redirect stderr at OS level
     stderr_fd = sys.stderr.fileno()
     old_stderr_fd = os.dup(stderr_fd)
 
@@ -225,21 +225,21 @@ def list_available_cameras(max_cameras: int = 3, target_width: int = 1280, targe
                 cap = cv2.VideoCapture(i)
 
             if cap.isOpened():
-                # Configurer la résolution cible pour obtenir les vraies capacités
+                # Configure target resolution to get actual capabilities
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, target_width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, target_height)
                 cap.set(cv2.CAP_PROP_FPS, 30)
 
-                # Lire une frame pour activer les paramètres
+                # Read a frame to activate the settings
                 cap.read()
 
-                # Récupérer les infos réelles
+                # Get actual info
                 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 fps = cap.get(cv2.CAP_PROP_FPS)
                 backend = cap.getBackendName()
 
-                # Utiliser le vrai nom si disponible
+                # Use real name if available
                 if camera_index < len(camera_names_list):
                     name = camera_names_list[camera_index]
                 else:
@@ -255,7 +255,7 @@ def list_available_cameras(max_cameras: int = 3, target_width: int = 1280, targe
                 cap.release()
                 camera_index += 1
     finally:
-        # Restaurer stderr
+        # Restore stderr
         os.dup2(old_stderr_fd, stderr_fd)
         os.close(old_stderr_fd)
 

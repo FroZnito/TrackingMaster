@@ -2,17 +2,20 @@
 
 A comprehensive computer vision tracking system for hands, face, body, and activity recognition.
 
-## Current Version: 0.1 - Foundation
+## Current Version: 0.2 - Hand Detection
 
-Basic webcam access with real-time display and controls.
+Real-time hand tracking with MediaPipe.
 
-## Features (v0.1)
+## Features
 
-- Webcam video capture
+- Webcam video capture with camera selection
+- **Hand tracking with MediaPipe** (up to 2 hands)
+- Detection of left/right hand with confidence score
+- 21 landmarks per hand with connections
 - Real-time display with FPS counter
 - Pause/Resume functionality
 - Screenshot capture
-- Camera error handling
+- Toggle hand tracking on/off
 
 ## Installation
 
@@ -44,6 +47,7 @@ python main.py
 | `SPACE` | Pause / Resume |
 | `S` | Take screenshot |
 | `I` | Toggle info overlay |
+| `H` | Toggle hand tracking |
 
 ## Project Structure
 
@@ -52,7 +56,8 @@ TrackingMaster/
 ├── main.py              # Entry point
 ├── src/
 │   ├── __init__.py
-│   └── camera.py        # Camera module
+│   ├── camera.py        # Camera module
+│   └── hand_tracker.py  # Hand tracking module
 ├── screenshots/         # Saved screenshots
 ├── requirements.txt
 ├── ROADMAP.md          # Development roadmap
@@ -63,8 +68,11 @@ TrackingMaster/
 
 See [ROADMAP.md](ROADMAP.md) for the complete development plan.
 
-**Upcoming versions:**
+**Completed:**
+- v0.1 - Foundation
 - v0.2 - Hand Detection
+
+**Upcoming versions:**
 - v0.3 - Finger Tracking
 - v0.4 - Face Detection
 - v0.5 - Head Pose Estimation

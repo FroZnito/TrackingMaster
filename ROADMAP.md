@@ -20,15 +20,15 @@ Un projet de tracking complet utilisant la vision par ordinateur et l'intelligen
 
 ---
 
-## Version 0.2 - Hand Detection
+## Version 0.2 - Hand Detection ✅
 **Objectif** : Détecter la présence des mains dans le flux vidéo
 
 ### Features
-- [ ] Intégration de MediaPipe Hands
-- [ ] Détection des mains (gauche/droite)
-- [ ] Affichage des landmarks (21 points par main)
-- [ ] Affichage des connexions entre les points
-- [ ] Compteur de mains détectées
+- [x] Intégration de MediaPipe Hands
+- [x] Détection des mains (gauche/droite)
+- [x] Affichage des landmarks (21 points par main)
+- [x] Affichage des connexions entre les points
+- [x] Compteur de mains détectées
 
 ### Technologies
 - MediaPipe
